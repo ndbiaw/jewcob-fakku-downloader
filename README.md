@@ -1,5 +1,6 @@
+Not my code, just fork it on GitHub to make it easy for people to find.
+Original project: https://gitgud.io/combtmp-w5f08/jewcob-downloader
 forked from https://github.com/Hikot0shi/fakku-downloader/
-
 tested on 7595 urls   
 7595 works downloaded without an issue (games and anime skipped)   
 running 24x7 on loonix debian vps with a single ip with:   
