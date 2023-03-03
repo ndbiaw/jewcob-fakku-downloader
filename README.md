@@ -1,4 +1,4 @@
-Not my code, just fork it on GitHub to make it easy for people to find.
+Not my code, just fork it to GitHub to make it easy for people to find.
 
 Original project: https://gitgud.io/combtmp-w5f08/jewcob-downloader
 
