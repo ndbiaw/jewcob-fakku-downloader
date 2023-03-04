@@ -11,7 +11,7 @@ from downloader import (
     TIMEOUT,
     URLS_FILE,
     WAIT,
-    version,
+    script_version,
 )
 
 
@@ -149,7 +149,7 @@ def main():
 
     log = logging.getLogger()
     if args.debug:
-        log.debug(f"Version: %s", version)
+        log.debug(f"Version: %s", script_version)
         log.debug("Python %s - %s", sys.version, sys.platform)
         log.debug(sys.argv)
         log.debug(args)
@@ -198,10 +198,7 @@ def main():
         proxy=args.proxy,
     )
 
-    if Path(".session").is_dir() or Path("_session").is_dir():
-        logging.info(f"Using user data directory")
-        loader.init_browser(gui=args.gui)
-    elif not Path(args.cookies_file).is_file():
+    if not Path(args.cookies_file).is_file():
         logging.info(
             f"Cookies file({args.cookies_file}) are not detected. Please, "
             + "login in next step for generate cookie for next runs."

@@ -13,7 +13,7 @@ from typing import Dict
 
 import undetected_chromedriver as uc
 from PIL import Image
-from dateutil.parser import parse as parsedate
+from dateutil.parser import parse
 from selenium.common.exceptions import (
     JavascriptException,
     NoSuchElementException,
@@ -22,7 +22,7 @@ from selenium.common.exceptions import (
     WebDriverException,
 )
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium_interceptor.interceptor import cdp_listener
 from tqdm import tqdm
@@ -31,8 +31,6 @@ log = logging.getLogger()
 
 BASE_URL = "https://www.fakku.net"
 LOGIN_URL = f"{BASE_URL}/login/"
-# Initial display settings for browser. Used for graphic mode
-MAX_DISPLAY_SETTINGS = [800, 600]
 # Path to headless driver
 if sys.platform == "win32":
     EXEC_PATH = "chromedriver.exe"
@@ -63,7 +61,7 @@ USER_AGENT = None
 # Should a cbz archive file be created
 ZIP = False
 # script version
-version = "v0.2"
+script_version = "v0.2.2"
 
 # create script tag to put in html body/head
 js_name_todata = secrets.choice(string.ascii_letters) + "".join(
@@ -99,17 +97,17 @@ class ErrorReason(enum.Enum):
         return self.value
 
     @classmethod
-    def from_json(cls, json):
-        return cls(json)
+    def from_json(cls, fjson):
+        return cls(fjson)
 
 
-class cdp_listenerMOD(cdp_listener):
+class CDPListenerMOD(cdp_listener):
     def __init__(self, driver):
         super().__init__(driver)
         self.mod_fakku_json = {}
         self.saved_requests = {}
 
-    def start_threadedMOD(self, listener: Dict[str, callable]):
+    def start_threaded_mod(self, listener: Dict[str, callable]):
         if listener:
             self.listener = listener
 
@@ -128,7 +126,7 @@ class cdp_listenerMOD(cdp_listener):
 
         return thread
 
-    async def requestsMOD(self, connection):
+    async def requests_mod(self, connection):
         session, devtools = connection.session, connection.devtools
         pattern = self.specify_patterns(self.all_requests)
         await session.execute(devtools.fetch.enable(patterns=pattern))
@@ -179,12 +177,11 @@ class cdp_listenerMOD(cdp_listener):
                 if (
                     "books.fakku.net" in event.request.url
                     and "/images/" not in event.request.url
-                ):
-                    if not self.mod_fakku_json:
-                        body = await self.get_response_body(event.request_id)
+                ) and not self.mod_fakku_json:
+                    body = await self.get_response_body(event.request_id)
 
-                        decoded = self.decode_body(body[0], event)
-                        self.mod_fakku_json = decoded
+                    decoded = self.decode_body(body[0], event)
+                    self.mod_fakku_json = decoded
 
                 if "books.fakku.net/images/manga" in event.request.url:
                     if event.request.url not in self.saved_requests:
@@ -214,7 +211,7 @@ def append_images(
     direction="horizontal",
     bg_color=(255, 255, 255),
     alignment="center",
-    src_type=None,
+    src_type="unscrambled",
     dirc=None,
 ):
     """
@@ -226,16 +223,14 @@ def append_images(
         bg_color: Background color (default: white)
         alignment: alignment mode if images need padding;
            'left', 'right', 'top', 'bottom', or 'center'
-        src_type: image type, scrambled or not (default: None)
+        src_type: image type, scrambled or not (default: 'unscrambled')
         dirc: reading direction, "Left to Right" or none (default: None)
 
     Returns:
         Concatenated image as a new PIL image object.
     """
     log.debug("Joining spreads")
-    if dirc == "Left to Right":
-        pass
-    else:
+    if dirc != "Left to Right":
         imgs.reverse()
     if type(imgs[0]) is str:
         images = map(Image.open, imgs)
@@ -364,7 +359,7 @@ def get_urls_list(urls_file, done_file):
     param: done_file -- string
         Name or path of .txt file with successfully downloaded manga urls
     return: urls -- list
-        List of urls from urls_file
+        Urls from urls_file
     """
     log.debug("Parsing list of urls")
     done = set()
@@ -433,8 +428,6 @@ class JewcobDownloader:
             Contains binary data with cookies
         param: chrome_path -- string
             Path to the browser
-        param: default_display -- list of two int (width, height)
-            Initial display settings. After loading the page, they will be changed
         param: timeout -- float
             Timeout upon waiting for first page to load
         param: wait -- float
@@ -455,18 +448,19 @@ class JewcobDownloader:
         self.chrome_path = chrome_path
         self.session_path = session_path
         self.browser = None
-        self.default_display = MAX_DISPLAY_SETTINGS
         self.timeout = timeout
         self.wait = wait
         self.login = login
         self.password = password
         self.zip = _zip
         self.save_metadata = save_metadata
-        self.type = None
+        self.type = "unscrambled"
         self.proxy = proxy
         self.version = version
         self.session = session
         self.done = 0
+        self.cdp_listener = None
+        self.thread = None
 
     def init_browser(self, auth=False, gui=False):
         """
@@ -544,11 +538,7 @@ class JewcobDownloader:
         self.browser.set_script_timeout(self.timeout)
         self.browser.set_page_load_timeout(self.timeout)
 
-        if gui:
-            self.browser.set_window_size(*self.default_display)
-
-        if not self.session:
-            self.__set_cookies()
+        self.__set_cookies()
 
         log.debug("Checking if user is logged")
         try:
@@ -564,14 +554,10 @@ class JewcobDownloader:
             )
             cn = login_check.get_property("textContent")
             if cn != "My Account ":
-                log.info("You aren't logged in")
-                log.info("Probably expired cookies")
-                log.info("Remove cookies.json and try again")
-                log.debug(caret.get_attribute('outerHTML'))
-                log.debug(login_check.get_attribute('outerHTML'))
+                log.debug(caret.get_attribute("outerHTML"))
+                log.debug(login_check.get_attribute("outerHTML"))
                 log.debug(cn)
-                self.browser.quit()
-                exit()
+                raise NoSuchElementException(msg="Missing My Account menu")
         except NoSuchElementException as err:
             log.info("You aren't logged in")
             log.info("Probably expired cookies")
@@ -582,10 +568,10 @@ class JewcobDownloader:
 
         log.info("Browser initialized")
 
-        self.cdp_listener = cdp_listenerMOD(driver=self.browser)
-        self.thread = self.cdp_listener.start_threadedMOD(
+        self.cdp_listener = CDPListenerMOD(driver=self.browser)
+        self.thread = self.cdp_listener.start_threaded_mod(
             listener={
-                "listener": self.cdp_listener.requestsMOD,
+                "listener": self.cdp_listener.requests_mod,
                 "at_event": self.cdp_listener.at_request,
             }
         )
@@ -652,6 +638,7 @@ class JewcobDownloader:
         if self.proxy:
             options.add_argument(f"--proxy-server={self.proxy}")
 
+
         log.info("Connecting to chromedriver")
         try:
             self.browser = uc.Chrome(
@@ -674,8 +661,11 @@ class JewcobDownloader:
                 if cbv > cdv:
                     self.version = cdv
                     return self.__auth()
+                else:
+                    raise err
+            else:
+                raise err
 
-        self.browser.set_window_size(*self.default_display)
         self.browser.get(LOGIN_URL)
         try:
             h2 = self.browser.find_element(By.CSS_SELECTOR, "h2")
@@ -702,9 +692,8 @@ class JewcobDownloader:
         self.browser.find_element(By.CSS_SELECTOR, 'button[class*="js-submit"]').click()
 
         input("\nPress Enter to continue after you login...")
-        if not self.session:
-            with open(self.cookies_file, "w") as f:
-                json.dump(self.browser.get_cookies(), f, indent=True)
+        with open(self.cookies_file, "w") as f:
+            json.dump(self.browser.get_cookies(), f, indent=True)
 
         self.browser.quit()
 
@@ -728,7 +717,7 @@ class JewcobDownloader:
                     req_resp = self.cdp_listener.saved_requests[resp_url]
 
                     lmt = (
-                        parsedate(req_resp["headers"]["last-modified"])
+                        parse(req_resp["headers"]["last-modified"])
                         .astimezone()
                         .timestamp()
                     )
@@ -751,7 +740,7 @@ class JewcobDownloader:
             ] = image_path
 
     def get_page_metadata(self, url):
-        "crawl main page looking for metadata"
+        """crawl main page looking for metadata"""
         metadata = OrderedDict()
         if self.save_metadata != "basic":
             log.debug("Parsing right side for metadata")
@@ -887,8 +876,6 @@ class JewcobDownloader:
                             ah = a.get_attribute("href")
                             cd[cn] = ah
                         metadata["Chapters"] = cd
-                    else:
-                        pass
             except Exception as meta_err:
                 log.info(f"Metadata parser issue bottom, please report url: {url}")
                 log.info(str(meta_err))
@@ -897,7 +884,7 @@ class JewcobDownloader:
         return metadata
 
     def get_api_metadata(self, metadata):
-        "parse api json response for metadata"
+        """parse api json response for metadata"""
         metadata_api = OrderedDict()
         log.debug("Parsing api response for metadata")
 
@@ -950,8 +937,6 @@ class JewcobDownloader:
 
         if "key_data" in self.cdp_listener.mod_fakku_json:
             self.type = "scrambled"
-        else:
-            self.type = "unscrambled"
 
         if "Artist" in metadata_api:
             artist = metadata_api["Artist"]
@@ -1054,12 +1039,11 @@ class JewcobDownloader:
 
         urls_processed = 0
         for url in self.urls:
-
             log.info(url)
             self.timeout = TIMEOUT
             self.wait = WAIT
             self.cdp_listener.mod_fakku_json = {}
-            self.type = None
+            self.type = "unscrambled"
             self.cdp_listener.saved_requests = {}
             self.done = 0
 
@@ -1156,18 +1140,19 @@ class JewcobDownloader:
             )
 
             for page in self.cdp_listener.mod_fakku_json["pages"]:
-
                 # get page response image
                 self.get_response_images(page, response_folder, padd)
 
                 # wait until loader hides itself
                 WebDriverWait(self.browser, self.timeout).until(
-                    EC.invisibility_of_element_located((By.CLASS_NAME, "loader"))
+                    expected_conditions.invisibility_of_element_located(
+                        (By.CLASS_NAME, "loader")
+                    )
                 )
 
                 # wait until read notification hides
                 WebDriverWait(self.browser, self.timeout).until(
-                    EC.invisibility_of_element_located(
+                    expected_conditions.invisibility_of_element_located(
                         (By.CSS_SELECTOR, 'div[class^="ui notify-container large"]')
                     )
                 )
@@ -1234,17 +1219,19 @@ class JewcobDownloader:
                     left = spreads[page][0]
                     right = spreads[page][-1]
                     fin_img = []
-                    imL = self.cdp_listener.mod_fakku_json["pages"][left]["image_path"]
-                    fin_img.append(imL)
-                    imR = self.cdp_listener.mod_fakku_json["pages"][right]["image_path"]
-                    fin_img.append(imR)
+                    im_l = self.cdp_listener.mod_fakku_json["pages"][left]["image_path"]
+                    fin_img.append(im_l)
+                    im_r = self.cdp_listener.mod_fakku_json["pages"][right][
+                        "image_path"
+                    ]
+                    fin_img.append(im_r)
 
-                    namL = imL.split(sp_c)[-1].split(".")[0]
-                    extL = imL.split(sp_c)[-1].split(".")[-1]
-                    namR = imR.split(sp_c)[-1].split(".")[0]
-                    extR = imR.split(sp_c)[-1].split(".")[-1]
+                    nam_l = im_l.split(sp_c)[-1].split(".")[0]
+                    ext_l = im_l.split(sp_c)[-1].split(".")[-1]
+                    nam_r = im_r.split(sp_c)[-1].split(".")[0]
+                    ext_r = im_r.split(sp_c)[-1].split(".")[-1]
 
-                    spread_name = namL + "-" + namR
+                    spread_name = nam_l + "-" + nam_r
                     destination_file_spread = os.sep.join(
                         [manga_folder, f"{spread_name}a.png"]
                     )
@@ -1257,20 +1244,24 @@ class JewcobDownloader:
                         dirc=direction,
                     )
                     combo.save(destination_file_spread)
-                    imRmt = os.path.getmtime(imR)
-                    os.utime(destination_file_spread, (imRmt, imRmt))
+                    im_r_mt = os.path.getmtime(im_r)
+                    os.utime(destination_file_spread, (im_r_mt, im_r_mt))
 
-                    destination_file_L = os.sep.join([manga_folder, f"{namL}b.{extL}"])
-                    destination_file_R = os.sep.join([manga_folder, f"{namR}c.{extR}"])
+                    destination_file_l = os.sep.join(
+                        [manga_folder, f"{nam_l}b.{ext_l}"]
+                    )
+                    destination_file_r = os.sep.join(
+                        [manga_folder, f"{nam_r}c.{ext_r}"]
+                    )
 
-                    shutil.move(imL, destination_file_L)
+                    shutil.move(im_l, destination_file_l)
                     self.cdp_listener.mod_fakku_json["pages"][left][
                         "image_path"
-                    ] = destination_file_L
-                    shutil.move(imR, destination_file_R)
+                    ] = destination_file_l
+                    shutil.move(im_r, destination_file_r)
                     self.cdp_listener.mod_fakku_json["pages"][right][
                         "image_path"
-                    ] = destination_file_R
+                    ] = destination_file_r
 
                     log.debug(destination_file_spread)
 
@@ -1289,32 +1280,29 @@ class JewcobDownloader:
             # delete old requests
             del self.cdp_listener.saved_requests
 
-            if self.done > 0:
-                if log.level == 10:
-                    resp_info_file = os.sep.join([response_folder, f"fakku_data.json"])
-                    cks = self.browser.get_cookies()
-                    for cookie in cks:
-                        if cookie["name"] in {"fakku_zid"}:
-                            self.cdp_listener.mod_fakku_json[cookie["name"]] = cookie[
-                                "value"
-                            ]
+            if self.done > 0 and log.level == 10:
+                resp_info_file = os.sep.join([response_folder, f"fakku_data.json"])
+                cks = self.browser.get_cookies()
+                for cookie in cks:
+                    if cookie["name"] in {"fakku_zid"}:
+                        self.cdp_listener.mod_fakku_json[cookie["name"]] = cookie[
+                            "value"
+                        ]
 
-                    json.dump(
-                        self.cdp_listener.mod_fakku_json,
-                        open(resp_info_file, "w", encoding="utf-8"),
-                        indent=True,
-                        ensure_ascii=False,
-                    )
+                json.dump(
+                    self.cdp_listener.mod_fakku_json,
+                    open(resp_info_file, "w", encoding="utf-8"),
+                    indent=True,
+                    ensure_ascii=False,
+                )
 
             if self.save_metadata != "none":
-
                 metd = OrderedDict()
                 sorted_d = sorted(metadata.items(), key=lambda x: x[0])
                 for sd in sorted_d:
                     sdd = sd[1]
-                    if type(sdd) is list:
-                        if len(sdd) == 1:
-                            sdd = sd[1][0]
+                    if type(sdd) is list and len(sdd) == 1:
+                        sdd = sd[1][0]
                     metd[sd[0]] = sdd
 
                 log.debug("Dumping metadata in info.json file")
@@ -1343,6 +1331,7 @@ class JewcobDownloader:
             urls_processed += 1
             log.debug("Finished parsing page")
             sleep(self.wait)
+        log.info(f"Urls processed: {urls_processed}")
         self.program_exit()
 
     def waiting_loading_page(self, url, page=None):
@@ -1384,7 +1373,9 @@ class JewcobDownloader:
         log.debug("Waiting for element")
         while not elm_found:
             try:
-                element = EC.presence_of_element_located((By.XPATH, elem_xpath))
+                element = expected_conditions.presence_of_element_located(
+                    (By.XPATH, elem_xpath)
+                )
                 elm_found = WebDriverWait(self.browser, self.timeout).until(element)
             except TimeoutException as err:
                 try:
