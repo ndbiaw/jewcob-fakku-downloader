@@ -148,6 +148,14 @@ class CDPListenerMOD(cdp_listener):
         if event.response_status_code:
             if event.response_status_code == 200:
                 log.debug(f"Response: {event.request.url}")
+
+                if '/read' in event.request.url:
+                    for header in event.response_headers:
+                        if header.name == 'content-type' and header.value == 'application/json' :
+                            body = await self.get_response_body(event.request_id)
+                            decoded = self.decode_body(body[0], event)                            
+                            self.mod_fakku_json = decoded
+
                 if (
                     "fakku.net/hentai/" in event.request.url
                     and "/read/page/" in event.request.url
@@ -183,7 +191,7 @@ class CDPListenerMOD(cdp_listener):
                     decoded = self.decode_body(body[0], event)
                     self.mod_fakku_json = decoded
 
-                if "books.fakku.net/images/manga" in event.request.url:
+                if "b.fakku.net/" in event.request.url:
                     if event.request.url not in self.saved_requests:
                         body = await self.get_response_body(event.request_id)
 
@@ -546,14 +554,14 @@ class JewcobDownloader:
                 self.browser.get(BASE_URL)
             caret = self.browser.find_element(
                 By.CSS_SELECTOR,
-                "i.fa-caret-down",
+                "i.fa-angle-down",
             )
             login_check = caret.find_element(
                 By.XPATH,
                 "..",
             )
             cn = login_check.get_property("textContent")
-            if cn != "My Account ":
+            if not "My Account" in cn:
                 log.debug(caret.get_attribute("outerHTML"))
                 log.debug(login_check.get_attribute("outerHTML"))
                 log.debug(cn)
@@ -603,7 +611,8 @@ class JewcobDownloader:
         with open(self.cookies_file, "rb") as f:
             cookies = json.load(f)
             for cookie in cookies:
-                cookie["expiry"] = int(cookie["expiry"])
+                if "expiry" in cookie:
+                    cookie["expiry"] = int(cookie["expiry"])
                 if cookie["name"] in {"fakku_sid", "fakku_zid"}:
                     if cookie["expiry"] < time_now:
                         log.info("Expired cookies")
@@ -716,13 +725,8 @@ class JewcobDownloader:
                 if resp_url in self.cdp_listener.saved_requests:
                     req_resp = self.cdp_listener.saved_requests[resp_url]
 
-                    lmt = (
-                        parse(req_resp["headers"]["last-modified"])
-                        .astimezone()
-                        .timestamp()
-                    )
-                    resp_file_type = req_resp["headers"]["content-type"].split("/")[-1]
-                    resp_file_type = resp_file_type.replace("jpeg", "jpg")
+                    # FIXME: Do it right
+                    resp_file_type = "png"
                     resp_data = a2b_base64(req_resp["body"])
                     resp_destination_file = os.sep.join(
                         [
@@ -732,7 +736,7 @@ class JewcobDownloader:
                     )
                     with open(resp_destination_file, "wb") as file:
                         file.write(resp_data)
-                    os.utime(resp_destination_file, (lmt, lmt))
+                    os.utime(resp_destination_file)
                     image_path = resp_destination_file
                 sleep(self.wait)
             self.cdp_listener.mod_fakku_json["pages"][page][
@@ -1116,7 +1120,7 @@ class JewcobDownloader:
                 metadata[k] = v
             log.debug(metadata)
 
-            page_count = metadata["Pages"]
+            page_count = int(metadata["Pages"])
             if page_count > 1000:
                 padd = 4
             elif page_count > 100:
@@ -1362,7 +1366,7 @@ class JewcobDownloader:
                 sleep(self.wait)
 
         if page == "main":
-            elem_xpath = "//div[contains(@class, 'group flex-1 relative align-top px-4 hidden sm:inline-block')]"
+            elem_xpath = "//div[contains(@class, 'inline-block relative text-center mx-auto')]"
         elif page == "first":
             elem_xpath = "//div[@data-name='PageView']"
         else:

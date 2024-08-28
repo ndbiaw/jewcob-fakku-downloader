@@ -1,0 +1,8 @@
+cookies.json
+debug.log
+done.txt
+urls.txt
+
+__pycache__
+manga/
+response/
